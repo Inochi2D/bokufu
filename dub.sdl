@@ -1,0 +1,6 @@
+name "bokufu"
+description "A minimal D application."
+authors "quydx"
+copyright "Copyright © 2024, quydx"
+license "proprietary"
+dependency "numem" version="~>0.10.0"

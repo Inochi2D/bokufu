@@ -5,34 +5,7 @@ import bokufu.parser.unparsed;
 import bokufu.tokenizer;
 import bokufu.token;
 
-import std.algorithm : move;
-import std.sumtype;
-
 import numem.all;
-
-template matches(Types...)
-{
-    import std.meta : staticMap, templateOr;
-    import std.typecons : Yes;
-
-    
-
-    bool matches(SumType)(auto ref SumType arg)
-    if (isSumType!SumType)
-    {
-        alias exactly(T) = function (arg)
-        {
-            static assert(is(typeof(arg) == T));
-            return true;
-        };
-
-
-        return match!(
-            staticMap!(exactly, Types),
-            _ => false,
-        )(arg);
-    }
-}
 
 
 struct Parser
@@ -50,48 +23,43 @@ package(bokufu.parser) @nogc:
         while (tokenizer.hasMoreTokens()) {
             auto peek = tokenizer.peekToken();
 
-            if (peek.matches!(WhitespaceToken)) {
+            if (peek.type == TokenType.whitespaceToken) {
                 tokenizer.skipToken();
+            } else if (peek.type == TokenType.atKeywordToken) {
+                tokenizer.skipToken();
+                auto rule = this.consumeAtRule(peek.data.at_);
+                if (!rule.name.empty) {
+                    ret ~= RawRule(rule);
+                }
             } else {
-                peek.match!(
-                    (AtKeywordToken a) {
-                        tokenizer.skipToken();
-                        auto rule = this.consumeAtRule(a);
-                        if (!rule.name.empty) {
-                            ret ~= RawRule(move(rule));
-                        }
-                    },
-                    (t) {
-                        auto rule = this.consumeQualifiedRule();
-                        ret ~= RawRule(move(rule));
-                    }
-                );
+                auto rule = this.consumeQualifiedRule();
+                ret ~= RawRule(rule);
             }
         }
 
         return ret;
     }
 
-    RawQualifiedRule consumeQualifiedRule(
+    RawQualifiedRuleData consumeQualifiedRule(
         bool nested = false,
         bool hasStop = false,
-        Token stop = Token(WhitespaceToken())
+        Token stop = Token(TokenType.whitespaceToken)
     ) {
-        RawQualifiedRule rule = {};
+        RawQualifiedRuleData rule = {};
 
         while (tokenizer.hasMoreTokens()) {
             auto peek = tokenizer.peekToken();
 
             if(hasStop && peek == stop) {
                 break;
-            } else if (peek.matches!(CloseCurlyToken)) {
+            } else if (peek.type == TokenType.closeCurlyToken) {
                 if (nested) {
                     break;
                 }
 
                 rule.prelude ~= RawComponentValue(peek);
                 tokenizer.skipToken();
-            } else if (peek.matches!(OpenCurlyToken)) {
+            } else if (peek.type == TokenType.openCurlyToken) {
                 // If the first two non-<whitespace-token> values of rule’s prelude are an
                 // <ident-token> whose value starts with "--" followed by a <colon-token>, then:
                 // THIS IS NOT DONE
@@ -99,26 +67,26 @@ package(bokufu.parser) @nogc:
                 tokenizer.skipToken();
                 auto blockData = this.consumeRawBlockContents();
                 if (!blockData.empty) {
-                    blockData[0].match!(
-                        (vector!RawDeclaration decls) {
-                            rule.declarations = move(decls);
-                            blockData.popFront();
-                        },
-                        (_) {}
-                    );
+                    // blockData[0].match!(
+                    //     (vector!RawDeclaration decls) {
+                    //         rule.declarations = move(decls);
+                    //         blockData.popFront();
+                    //     },
+                    //     (_) {}
+                    // );
 
-                    while (!blockData.empty) {
-                        auto data = blockData[0];
-                        data.match!(
-                            (vector!RawDeclaration decls) {
-                                rule.children ~= nogc_new!RawRule(RawRule(RawNestedDeclarationRule(move(decls))));
-                            },
-                            (RawRule* a) {
-                                rule.children ~= a;
-                            },
-                        );
-                        blockData.popFront();
-                    }
+                    // while (!blockData.empty) {
+                    //     auto data = blockData[0];
+                    //     data.match!(
+                    //         (vector!RawDeclaration decls) {
+                    //             rule.children ~= nogc_new!RawRule(RawRule(RawNestedDeclarationRule(move(decls))));
+                    //         },
+                    //         (RawRule* a) {
+                    //             rule.children ~= a;
+                    //         },
+                    //     );
+                    //     blockData.popFront();
+                    // }
                 }
                 // consume the last `}`
                 tokenizer.consumeToken();
@@ -130,31 +98,31 @@ package(bokufu.parser) @nogc:
         }
 
         // really should be `None`
-        return RawQualifiedRule();
+        return RawQualifiedRuleData();
     }
 
     // Assumes `start` was the last consumed token
-    RawAtRule consumeAtRule(AtKeywordToken start, bool nested = false) {
-        RawAtRule rule = {
+    RawAtRuleData consumeAtRule(AtKeywordTokenData start, bool nested = false) {
+        RawAtRuleData rule = {
             name: start.value
         };
 
         while (tokenizer.hasMoreTokens()) {
             auto next = tokenizer.consumeToken();
 
-            if(next.matches!(SemicolonToken)) {
+            if(next.type == TokenType.semicolonToken) {
                 break;
-            } else if (next.matches!(CloseCurlyToken)) {
+            } else if (next.type == TokenType.closeCurlyToken) {
                 if (nested) {
                     break;
                 }
 
                 rule.prelude ~= RawComponentValue(next);
-            } else if (next.matches!(OpenCurlyToken)) {
+            } else if (next.type == TokenType.openCurlyToken) {
                 auto blockData = this.consumeRawBlockContents();
                 tokenizer.consumeToken();
 
-                rule.childRules ~= move(blockData);
+                rule.childRules ~= blockData;
             } else {
                 rule.prelude ~= this.consumeComponentValue(next);
             }
@@ -170,9 +138,9 @@ package(bokufu.parser) @nogc:
         while (tokenizer.hasMoreTokens()) {
             auto peek = tokenizer.peekToken();
 
-            if(peek.matches!(CloseCurlyToken)) {
+            if(peek.type == TokenType.closeCurlyToken) {
                 break;
-            } else if(peek.matches!(WhitespaceToken) | peek.matches!(SemicolonToken)) {
+            } else if(peek.type == TokenType.whitespaceToken || peek.type == TokenType.semicolonToken) {
                 tokenizer.skipToken();
             } else {
                 //     (AtKeywordToken a) {
@@ -189,16 +157,16 @@ package(bokufu.parser) @nogc:
                         
                 auto decl = this.consumeDeclaration(true);
                 if (decl.name.size() > 0) {
-                    decls ~= move(decl);
+                    decls ~= decl;
                 } else {
                     this.tokenizer = cloned;
 
                     auto rule = this.consumeQualifiedRule();
 
                     if (!decls.empty) {
-                        rules ~= RawBlockContents(move(decls));
+                        rules ~= RawBlockContents(decls, null);
                     }
-                    rules ~= RawBlockContents(nogc_new!RawRule(RawRule(move(rule))));
+                    rules ~= RawBlockContents(vector!RawDeclaration(), nogc_new!RawRule(RawRule(rule)));
                 }
             }
         }
@@ -210,29 +178,19 @@ package(bokufu.parser) @nogc:
         RawDeclaration decl;
 
         Token cur = tokenizer.consumeToken();
-        if (cur.match!(
-            (IdentToken t) {
-                decl.name = move(t.value);
-                return false;
-            },
-            _ => true,
-        )) {
-            // TODO: bad declaration
+        if (cur.type == TokenType.identToken) {
+            auto data = &cur.data.ident_;
+            decl.name = data.value;
         }
         tokenizer.consumeWhitespace();
         
         cur = tokenizer.consumeToken();
-        if (cur.match!(
-            (ColonToken t) {
-                return false;
-            },
-            _ => true,
-        )) {
+        if (cur.type != TokenType.colonToken) {
             // TODO: bad declaration
         }
         tokenizer.consumeWhitespace();
 
-        auto list = this.consumeComponentValueList(nested, Token(SemicolonToken()));
+        auto list = this.consumeComponentValueList(nested, TokenType.semicolonToken);
 
         // if (list[list.size() - 2] == RawComponentValue(Token(DelimToken('!')))) {
         //     list[list.size() - 1].match!(
@@ -253,7 +211,7 @@ package(bokufu.parser) @nogc:
         //     );
         // }
 
-        while (list[list.size() - 1] == RawComponentValue(Token(WhitespaceToken()))) {
+        while (list[list.size() - 1] == RawComponentValue(Token(TokenType.whitespaceToken))) {
             list.popBack();
         }
 
@@ -263,43 +221,46 @@ package(bokufu.parser) @nogc:
         // TODO: custom properties
 
         for (int i = 0; i < list.size(); i++) {
-            list[i].match!(
-                (Token t) {
-                    t.match!(
-                        // Nothing
-                        (WhitespaceToken t) {},
-                        (_) {
+            final switch (list[i].type) {
+                case RawComponentValueType.token:
+                {
+                    switch (list[i].data.token_.type) {
+                        case TokenType.whitespaceToken: break;
+                        default:
                             seenOtherNonWhitespace = true;
-                        }
-                    );
-                },
-                (RawBlock t) {
-                    if (t.associated == BlockToken(OpenCurlyToken())) {
+                            break;
+                    }
+                    break;
+                }
+                case RawComponentValueType.rawBlock:
+                {
+                    if (list[i].data.block_.associated.type == TokenType.openCurlyToken) {
                         seenBlock = true;
                     } else {
                         seenOtherNonWhitespace = true;
                     }
-                },
-                (_) {
+                    break;
+                }
+                case RawComponentValueType.rawFunction:
                     seenOtherNonWhitespace = true;
-                },
-            );
+                    break;
+            }
         }
 
-        decl.values = move(list);
+        decl.values = list;
 
         return decl;
     }
 
-    vector!RawComponentValue consumeComponentValueList(bool nested = false, Token stop = Token(CloseParenToken())) {
+    vector!RawComponentValue consumeComponentValueList(bool nested = false, TokenType stop = TokenType.closeParenToken) {
         vector!RawComponentValue ret;
 
         while (tokenizer.hasMoreTokens()) {
             auto next = tokenizer.consumeToken();
 
-            if(next.matches!(CloseParenToken) || next == stop) {
+            if(next.type == TokenType.closeParenToken || next.type == stop) {
                 break;
-            } else if (next.matches!(CloseCurlyToken)) {
+            } else if (next.type == TokenType.closeCurlyToken) {
                 if (nested) {
                     break;
                 }
@@ -314,15 +275,16 @@ package(bokufu.parser) @nogc:
     }
 
     // Assumes `start` was the last consumed token
-    RawFunction consumeFunction(FunctionToken start) {
-        RawFunction func = {
+    RawFunctionData consumeFunction(FunctionTokenData start) {
+        RawFunctionData func = {
             name: start.value
         };
+        
 
         while (tokenizer.hasMoreTokens()) {
             auto next = tokenizer.consumeToken();
 
-            if(next.matches!(CloseParenToken)) {
+            if(next.type == TokenType.closeParenToken) {
                 break;
             } else {
                 func.args ~= nogc_new!RawComponentValue(this.consumeComponentValue(next));
@@ -332,21 +294,29 @@ package(bokufu.parser) @nogc:
         return func;
     }
     
-    RawBlock consumeSimpleBlock(BlockToken associated) {
-        RawBlock block = {
+    RawBlockData consumeSimpleBlock(Token associated) {
+        RawBlockData block = {
             associated: associated
         };
 
-        Token closing = associated.match!(
-            (OpenSquareToken a) => Token(CloseSquareToken()),
-            (OpenParenToken a) => Token(CloseParenToken()),
-            (OpenCurlyToken a) => Token(CloseCurlyToken()),
-        );
+        TokenType closing;
+        switch (associated.type) {
+            case TokenType.openSquareToken:
+                closing = TokenType.closeSquareToken;
+                break;
+            case TokenType.openParenToken:
+                closing = TokenType.closeParenToken;
+                break;
+            case TokenType.openCurlyToken:
+                closing = TokenType.closeCurlyToken;
+                break;
+            default: break;
+        }
 
         while (tokenizer.hasMoreTokens()) {
             auto next = tokenizer.consumeToken();
 
-            if(next == closing) {
+            if(next.type == closing) {
                 break;
             } else {
                 block.values ~= nogc_new!RawComponentValue(this.consumeComponentValue(next));
@@ -357,17 +327,17 @@ package(bokufu.parser) @nogc:
     }
 
     RawComponentValue consumeComponentValue(Token t) {
-        debug {
-            import std.stdio;
-            writeln("start component value ", t);
-        }
+        switch (t.type) {
+            case TokenType.openSquareToken:
+                goto case;
+            case TokenType.openParenToken:
+                goto case;
+            case TokenType.openCurlyToken:
+                return RawComponentValue(this.consumeSimpleBlock(t));
+            case TokenType.functionToken:
 
-        return t.match!(
-            (OpenSquareToken a) => RawComponentValue(this.consumeSimpleBlock(BlockToken(a))),
-            (OpenParenToken a) => RawComponentValue(this.consumeSimpleBlock(BlockToken(a))),
-            (OpenCurlyToken a) => RawComponentValue(this.consumeSimpleBlock(BlockToken(a))),
-            (FunctionToken a) => RawComponentValue(this.consumeFunction(a)),
-            (a) => RawComponentValue(Token(a)),
-        );
+                return RawComponentValue(this.consumeFunction(t.data.func_));
+            default: return RawComponentValue(t);
+        }
     }
 }

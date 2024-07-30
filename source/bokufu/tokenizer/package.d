@@ -3,18 +3,28 @@ module bokufu.tokenizer;
 import bokufu.token;
 
 import object : hashOf;
-import std.stdio;
-import std.ascii : isAlpha, isDigit, isHexDigit, toLower;
 import std.math : pow;
-import std.algorithm : move;
-import std.sumtype;
 
 import numem.all : nogc_new;
 import numem.all : nstring;
 
-import std.traits : isArray, isSomeString;
-
 nothrow @nogc:
+
+bool isAlpha(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+bool isDigit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+char toLower(char c) {
+	return cast(char)(c | 0x20);
+}
+
+bool isHexDigit(char c) {
+	return (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f') || (c >= '0' && c <= '9');
+}
 
 bool asciiCaseInsensitiveEq(const(char)[] test, const(char)[] equal) {
 	if (test.length != equal.length) {
@@ -117,7 +127,7 @@ package(bokufu.tokenizer) @nogc:
 
 	public void skipToken() {
 		if (this.cachedPosition != -1) {
-			this.position = this.cachedPosition;
+		 	this.position = this.cachedPosition;
 			this.cachedPosition = -1;
 		} else {
 			this.consumeToken();
@@ -131,40 +141,42 @@ package(bokufu.tokenizer) @nogc:
 			if (this.peek(1).isCssWhiteSpace()) {
 				this.consumeWhitespace();
 
-				return Token(WhitespaceToken());
+				return Token(TokenType.whitespaceToken);
 			} else if (this.peek(1) == '"') {
+				this.advance(1);
 				return this.consumeStringToken();
 			} else if (this.peek(1) == '#') {
 				this.advance(1);
 
 				if (this.peek(1).isCssIdent() || this.isValidEscape(1)) {
 					bool isId = this.wouldStartIdentSequence(1);
-					return Token(HashToken(
+					return Token(HashTokenData(
 						this.consumeIdentSequence(),
 						isId,
 					));
 				} else {
-					return Token(DelimToken('#'));
+					return Token(DelimTokenData('#'));
 				}
 			} else if (this.peek(1) == '\'') {
+				this.advance(1);
 				return this.consumeStringToken();
 			} else if (this.peek(1) == '(') {
 				this.advance(1);
-				return Token(OpenParenToken());
+				return Token(TokenType.openParenToken);
 			} else if (this.peek(1) == ')') {
 				this.advance(1);
-				return Token(CloseParenToken());
+				return Token(TokenType.closeParenToken);
 			} else if (this.peek(1) == '+') {
 				if (this.wouldStartNumber(1)) {
 					return this.consumeNumericToken();
 				} else {
 					this.advance(1);
 
-					return Token(DelimToken('+'));
+					return Token(DelimTokenData('+'));
 				}
 			} else if (this.peek(1) == ',') {
 				this.advance(1);
-				return Token(CommaToken());
+				return Token(TokenType.commaToken);
 			} else if (this.peek(1) == '-') {
 				if (this.wouldStartNumber(1)) {
 					return this.consumeNumericToken();
@@ -173,7 +185,7 @@ package(bokufu.tokenizer) @nogc:
 				} else {
 					this.advance(1);
 
-					return Token(DelimToken('-'));
+					return Token(DelimTokenData('-'));
 				}
 			} else if (this.peek(1) == '.') {
 				if (this.wouldStartNumber(1)) {
@@ -181,46 +193,46 @@ package(bokufu.tokenizer) @nogc:
 				} else {
 					this.advance(1);
 				
-					return Token(DelimToken('.'));
+					return Token(DelimTokenData('.'));
 				}
 			} else if (this.peek(1) == ':') {
 				this.advance(1);
-				return Token(ColonToken());
+				return Token(TokenType.colonToken);
 			} else if (this.peek(1) == ';') {
 				this.advance(1);
-				return Token(SemicolonToken());
+				return Token(TokenType.semicolonToken);
 			} else if (this.peek(1) == '<') {
 				this.advance(1);
 				
-				return Token(DelimToken('<'));
+				return Token(DelimTokenData('<'));
 			} else if (this.peek(1) == '@') {
 				this.advance(1);
 
 				if (this.wouldStartIdentSequence(1)) {
-					return Token(AtKeywordToken(this.consumeIdentSequence()));
+					return Token(AtKeywordTokenData(this.consumeIdentSequence()));
 				} else {
-					return Token(DelimToken('@'));
+					return Token(DelimTokenData('@'));
 				}
 			} else if (this.peek(1) == '[') {
 				this.advance(1);
-				return Token(OpenSquareToken());
+				return Token(TokenType.openSquareToken);
 			} else if (this.peek(1) == '\\') {
 				this.advance(1);
 				if (this.isValidEscape(0)) {
 					// TODO
 					assert(0);
 				} else {
-					return Token(DelimToken('\\'));
+					return Token(DelimTokenData('\\'));
 				}
 			} else if (this.peek(1) == ']') {
 				this.advance(1);
-				return Token(CloseSquareToken());
+				return Token(TokenType.closeSquareToken);
 			} else if (this.peek(1) == '{') {
 				this.advance(1);
-				return Token(OpenCurlyToken());
+				return Token(TokenType.openCurlyToken);
 			} else if (this.peek(1) == '}') {
 				this.advance(1);
-				return Token(CloseCurlyToken());
+				return Token(TokenType.closeCurlyToken);
 			} else if (this.peek(1).isDigit()) {
 				return this.consumeNumericToken();
 			} else if (this.peek(1).isCssIdentStart()) {
@@ -228,7 +240,7 @@ package(bokufu.tokenizer) @nogc:
 			} else {
 				this.advance();
 
-				return Token(DelimToken(this.peek()));
+				return Token(DelimTokenData(this.peek()));
 			}
 		} else {
 			assert(0);
@@ -460,7 +472,7 @@ package(bokufu.tokenizer) @nogc:
 				this.advance(1);
 				break;
 			} else if (isCssNewlineStarter(this.peek(1))) {
-				return Token(BadStringToken());
+				return Token(TokenType.badStringToken);
 			} else if (this.peek(1) == '\\') {
 				this.advance(1);
 
@@ -479,8 +491,8 @@ package(bokufu.tokenizer) @nogc:
 				value ~= this.peek();
 			}
 		}
-
-		return Token(StringToken(value));
+		
+		return Token(StringTokenData(value));
 	}
 
 	Token consumeNumericToken() {
@@ -488,21 +500,21 @@ package(bokufu.tokenizer) @nogc:
 
 		if (this.hasMore(1)) {
 			if (this.wouldStartIdentSequence(1)) {
-				return Token(DimensionToken(
+				return Token(DimensionTokenData(
 					number.value,
 					number.hadSign,
 					number.isInteger,
 					this.consumeIdentSequence(),
 				));
 			} else if (this.peek(1) == '%') {
-				return Token(PercentageToken(
+				return Token(PercentageTokenData(
 					number.value,
 					number.hadSign,
 				));
 			}
 		}
 
-		return Token(NumberToken(
+		return Token(NumberTokenData(
 			number.value,
 			number.hadSign,
 			number.isInteger,
@@ -517,10 +529,11 @@ package(bokufu.tokenizer) @nogc:
 				// TODO
 				assert(0);
 			} else if (this.peek(1) == '(') {
-				return Token(FunctionToken(value));
+				this.advance(1);
+				return Token(FunctionTokenData(value));
 			}
 		}
 
-		return Token(IdentToken(value));
+		return Token(IdentTokenData(value));
 	}
 }

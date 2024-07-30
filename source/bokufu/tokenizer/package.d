@@ -3,8 +3,8 @@ module bokufu.tokenizer;
 import bokufu.token;
 
 import object : hashOf;
-import std.math : pow;
 
+import inmath.math : pow;
 import numem.all : nogc_new;
 import numem.all : nstring;
 
